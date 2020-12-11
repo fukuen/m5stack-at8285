@@ -14,6 +14,7 @@
 */
 #include <M5Stack.h>
 #include <WiFi.h>
+#include "time.h"
 
 TFT_eSprite sprite = TFT_eSprite(&M5.Lcd);
 
@@ -414,7 +415,6 @@ void eATCIPSTART(String command) {
   } else {
     id = get_next_param(command);
     linkid = (int)id.toInt();
-    command = command.length() > command.indexOf(",") + 1 ? command.substring(command.indexOf(",") + 1) : "";
   }
   protocol = get_next_param(command);
   protocol = trimq(protocol);
@@ -433,7 +433,7 @@ void eATCIPSTART(String command) {
     } else {
       serial_ext.printf("CONNECT\r\n");
     }
-    serial_ext.printf("OK\r\n");
+    send_ok();
   } else {
     serial_ext.printf("ERROR\r\n");
   }
@@ -515,6 +515,30 @@ void eATIPDINFO(String command) {
   send_ok();
 }
 
+void eATCIPSNTPCFG(String command) {
+  echo(command);
+  command = get_args(command);
+  String enable = get_next_param(command);
+  String timezone = get_next_param(command);
+  String ntpServer1 = get_next_param(command);
+  ntpServer1 = trimq(ntpServer1);
+  const long  gmtOffset_sec = timezone.toInt() * 3600;
+  const int   daylightOffset_sec = 0;
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1.c_str());
+  send_ok();
+}
+
+void qATCIPSNTPTIME(String command) {
+  echo(command);
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    serial_ext.printf("\r\nERROR\r\n");
+    return;
+  }
+  serial_ext.printf("+CIPSNTPTIME:\"%s\"", asctime(&timeinfo));
+  send_ok();
+}
+
 void setup() {
   M5.begin();
   M5.Lcd.fillScreen(TFT_NAVY);
@@ -553,7 +577,7 @@ void loop() {
     }
     serial_ext.printf(",%d", avlen);
     if (ipd_mode == 1) {
-      serial_ext.printf(",%s", client.remoteIP().toString().c_str());
+      serial_ext.printf(",\"%s\"", client.remoteIP().toString().c_str());
       serial_ext.printf(",%d", client.remotePort());
     }
     serial_ext.printf(":");
@@ -568,7 +592,7 @@ void loop() {
 //    int size = client.readBytes((uint8_t *)buf, avlen);
 //    serial_ext.write((uint8_t *)buf, size);
 //    delay(100);
-    check_conn();
+//    check_conn(); //20201211
     return;
   }
 
@@ -576,19 +600,21 @@ void loop() {
   if (serial_ext.available() > 0) {
     // data
     if (recv_length > 0) {
-      delay(100);
-      int len = serial_ext.available();
-//      unsigned long start = millis();
-//      while (recv_length > 0) {
-//        char c = serial_ext.read();
-//        client.write(c);
-//        recv_length--;
-//      }
-      int size = serial_ext.readBytes(buf, len);
-      client.write(buf, size);
-      disp2(buf);
+//      delay(100);
+//      int len = serial_ext.available();
+      int len = recv_length;
+      unsigned long start = millis();
+      while (recv_length > 0) {
+        char c = serial_ext.read();
+        client.write(c);
+        recv_length--;
+      }
+//      int size = serial_ext.readBytes(buf, len);
+//      client.write(buf, size);
+//      disp2(buf);
 //      recv_length -= len;
       recv_length = 0;
+//      serial_ext.printf("\r\nbusy s...\r\n");
       serial_ext.printf("\r\nRecv %d bytes\r\n", len);
       sprintf(msg, "Recv %d bytes\r\n", len);
       disp2(msg);
@@ -712,8 +738,14 @@ void loop() {
       //Set baud rate
       eATUARTCUR(command);
     } else if (command.length() > 13 && command.substring(0, 13) == "AT+CIPDOMAIN=") {
-      //
+      //DNS Function
       eATCIPDOMAIN(command);
+    } else if (command.length() > 14 && command.substring(0, 14) == "AT+CIPSNTPCFG=") {
+      //Sets the Time Zone and the SNTP Server
+      eATCIPSNTPCFG(command);
+    } else if (command == "AT+CIPSNTPTIME?") {
+      //Queries the SNTP Time
+      qATCIPSNTPTIME(command);
     } else {
       error(command);
     }
